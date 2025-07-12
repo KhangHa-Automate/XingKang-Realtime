@@ -4,68 +4,71 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
-const rateLimit = require('express-rate-limit');
 const http = require('http');
-const socketio = require('socket.io');
+const socket = require('socket.io');
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const chatRoutes = require('./routes/chats');
 
 const app = express();
 const server = http.createServer(app);
-const io = socketio(server, {
+const io = socket(server, {
   cors: {
-    origin: process.env.CLIENT_URL,
-    methods: ['GET', 'POST']
+    origin: 'http://localhost:3000',
+    methods: ['GET', 'POST'],
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization']
   }
 });
 
-// Middleware
 app.use(cors());
 app.use(helmet());
 app.use(morgan('dev'));
 app.use(express.json());
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-});
-app.use(limiter);
+mongoose.connect(process.env.MONGO_URI);
 
-// Database connection
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log('MongoDB connected'))
-  .catch(err => console.log(err));
-
-// Socket.io connection
-io.on('connection', (socket) => {
-  console.log('New client connected');
-
-  socket.on('joinRoom', ({ userId }) => {
-    socket.join(userId);
-    console.log(`User ${userId} joined their room`);
-  });
-
-  socket.on('sendMessage', ({ senderId, receiverId, message }) => {
-    io.to(receiverId).emit('receiveMessage', { senderId, message });
-  });
-
-  socket.on('disconnect', () => {
-    console.log('Client disconnected');
-  });
-});
-
-// Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/chats', chatRoutes);
 
-// Error handling middleware
 app.use((err, req, res, next) => {
-  console.error(err.stack);
   res.status(500).send('Something broke!');
 });
 
 const PORT = process.env.PORT || 5000;
+console.log('>> Server starting ...');
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+io.on('connection', (socket) => {
+  console.log('>> Socket connected: ', socket.id);
+  
+  // Khi client kết nối
+  socket.on('joinRoom', ({ userId }) => {
+    console.log('>> JoinRoom: ', userId);
+    socket.join(userId); // Mỗi user vào một room riêng biệt
+    console.log('>> User joined room: ', userId);
+    console.log('>> Current rooms: ', Array.from(socket.rooms));
+  });
+
+  socket.on('sendMessage', ({ senderId, receiverId, message }) => {
+    // Khi nhận được tin nhắn từ client, gửi lại cho người nhận
+    console.log('>> SendMessage received: ', { senderId, receiverId, message });
+    console.log('>> Sending to room: ', receiverId);
+    
+    // Kiểm tra xem receiver có online không
+    const receiverRoom = io.sockets.adapter.rooms.get(receiverId);
+    if (receiverRoom) {
+      console.log('>> Receiver is online, sending message');
+      io.to(receiverId).emit('receiveMessage', { senderId, message });
+      console.log('>> Message sent to room: ', receiverId);
+    } else {
+      console.log('>> Receiver is offline: ', receiverId);
+    }
+  });
+
+  socket.on('disconnect', () => {
+    // Xử lý khi client ngắt kết nối (nếu cần)
+    console.log('>> Disconnect: ', socket.id);
+  });
+});

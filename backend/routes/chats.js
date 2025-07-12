@@ -8,5 +8,6 @@ router.use(authController.protect);
 router.get('/', chatController.getConversations);
 router.get('/:id', chatController.getMessages);
 router.post('/:id', chatController.saveMessage);
+router.patch('/:id/read', chatController.markMessagesAsRead);
 
 module.exports = router;
